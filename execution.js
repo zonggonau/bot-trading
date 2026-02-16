@@ -18,7 +18,7 @@ const exchange = new ccxt.binance({
 // Log the API URLs to verify Production configuration
 logger.info(`Binance Configured. Using Default CCXT URLs (PRODUCTION)`); 
 
-export async function executeTrade(symbol, action, price, tp, sl) {
+export async function executeTrade(symbol, action, price, tp, sl, leverage = 1) {
   // Ensure keys are loaded (just in case init happened before dotenv)
   if (!exchange.apiKey || !exchange.secret) {
      exchange.apiKey = process.env.BINANCE_API_KEY;
@@ -30,7 +30,7 @@ export async function executeTrade(symbol, action, price, tp, sl) {
       throw new Error("API Key Missing");
   }
 
-  logger.info(`🚀 Executing REAL PRODUCTION Trade: ${action} ${symbol} @ ${price} [TP: ${tp}, SL: ${sl}]`);
+  logger.info(`🚀 Executing REAL PRODUCTION Trade: ${action} ${symbol} @ ${price} [TP: ${tp}, SL: ${sl}] (Lev: x${leverage})`);
 
   try {
     // 1. Determine Order Side
@@ -40,7 +40,7 @@ export async function executeTrade(symbol, action, price, tp, sl) {
     // Target trade size: ~12 USDT (Fits $13 Balance & > $10 Min Order)
     // CONFIRMED: Using Spot API v3 (No Leverage)
     const targetNotional = 12; 
-    let quantity = targetNotional / price;
+    let quantity = (targetNotional / price) * leverage; // SIMULATED LEVERAGE (Increases position size)
     
     // Adjust to exchange precision limits
     // Need to load markets first to get precision info, but for speed we can try a generic approach or load once.
@@ -107,8 +107,8 @@ export async function executeTrade(symbol, action, price, tp, sl) {
     await registerTrade(symbol, action, order.price || price);
 
     // 5. Send Notification
-    const tradeDetails = `Action: **${action}**\nSymbol: **${symbol}**\nPrice: **$${order.price || price}**\nQuantity: **${quantity}**\nTake Profit: **$${tp}**\nStop Loss: **$${sl}**\nOrder ID: \`${order.id}\``;
-    await sendNotification(`Trade Executed: ${action} ${symbol}`, tradeDetails);
+    const tradeDetails = `Action: **${action}**\nSymbol: **${symbol}**\nAvg Price: **$${order.price || price}**\nQty: **${quantity}**\nLeverage: **x${leverage}**\nTP: **$${tp}**\nSL: **$${sl}**\nID: \`${order.id}\``;
+    await sendNotification(`Trade Executed: ${action} ${symbol} (x${leverage})`, tradeDetails);
 
     return {
       status: "filled",

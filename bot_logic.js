@@ -42,7 +42,7 @@ const BB_PERIOD = 20;
 const BB_STD_DEV = 2;
 const ADX_PERIOD = 14;
 const ADX_THRESHOLD = 30; // Increased for higher quality trends
-const MIN_CONFIDENCE = 80; // Minimum Score to trade
+const MIN_CONFIDENCE = 75; // Minimum Score to trade (75-89% Spot, 90%+ Leverage)
 
 // Risk Management Settings
 
@@ -163,15 +163,21 @@ async function analyzeMarket(symbol) {
 
   // FINAL DECISION
   if (score >= MIN_CONFIDENCE) {
+    // Dynamic Leverage Logic
+    const leverage = score >= 90 ? 2 : 1;
+    const type = leverage > 1 ? "LEVERAGE (2x)" : "SPOT (1x)";
+
+    logger.info(`🎯 Signal Qualifies as ${type}`);
+
     if (signalType === "BUY") {
       const tp = currentPrice * (1 + TP_PERCENT);
       const sl = currentPrice * (1 - SL_PERCENT);
-      return { action: "BUY", price: currentPrice, tp, sl, score };
+      return { action: "BUY", price: currentPrice, tp, sl, score, leverage };
     } 
     if (signalType === "SELL") {
       const tp = currentPrice * (1 - TP_PERCENT);
       const sl = currentPrice * (1 + SL_PERCENT);
-      return { action: "SELL", price: currentPrice, tp, sl, score };
+      return { action: "SELL", price: currentPrice, tp, sl, score, leverage };
     }
   }
 
@@ -261,8 +267,9 @@ export async function runBotLoop() {
         const riskCheck = await checkRisk();
         
         if (riskCheck.allowed) {
-          await executeTrade(symbol, action, price, tp, sl);
-          logger.info(`✅ Trade Executed: ${action} ${symbol}`);
+          const { leverage } = result;
+          await executeTrade(symbol, action, price, tp, sl, leverage);
+          logger.info(`✅ Trade Executed: ${action} ${symbol} (x${leverage})`);
         } else {
           logger.warn(`⛔ Trade Blocked by Risk Manager: ${riskCheck.reason}`);
         }
