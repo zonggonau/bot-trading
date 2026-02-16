@@ -1,0 +1,22 @@
+{
+  "name": "openclaw",
+  "version": "1.0.0",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@types/node": "^25.2.3",
+    "axios": "^1.13.5",
+    "ccxt": "^4.5.38",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "node-cron": "^4.2.1",
+    "open": "^11.0.0",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7",
+    "technicalindicators": "^3.1.0",
+    "winston": "^3.19.0"
+  }
+}
