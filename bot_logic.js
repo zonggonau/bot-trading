@@ -41,7 +41,10 @@ const EMA_PERIOD = 200;
 const BB_PERIOD = 20;
 const BB_STD_DEV = 2;
 const ADX_PERIOD = 14;
-const ADX_THRESHOLD = 25; // Minimum strength to confirm a trend
+const ADX_THRESHOLD = 30; // Increased for higher quality trends
+const MIN_CONFIDENCE = 95; // Minimum Score to trade
+
+// Risk Management Settings
 
 // Risk Management Settings
 const TP_PERCENT = 0.015; // Take Profit 1.5%
@@ -112,48 +115,64 @@ async function analyzeMarket(symbol) {
   logger.info(`Validating ${symbol} ($${currentPrice}):
     - RSI: ${lastRSI.toFixed(2)}
     - MACD: Hist=${lastMACD.histogram.toFixed(4)}
-    - EMA200: ${lastEMA.toFixed(2)}
     - BB: Upper=${lastBB.upper.toFixed(2)} Lower=${lastBB.lower.toFixed(2)}
-    - ADX: ${lastADX.adx.toFixed(2)} (Threshold: ${ADX_THRESHOLD})`);
+    - ADX: ${lastADX.adx.toFixed(2)}`);
 
-  // STRATEGY LOGIC: 3 Indicators Only (Simplified)
-  
-  // BUY SIGNAL (5 Indicators - STRICT)
-  // 1. Trend is UP (Price > EMA200)
-  // 2. Momentum is Oversold (RSI < 45)
-  // 3. MACD Histogram Positive (Reversal starting)
-  // 4. BB Confirmation: Price is below Middle Band (Buying the dip)
-  // 5. Trend Strength: ADX > 25 (Strong trend, avoid sideways)
-  const buySignal = 
-    currentPrice > lastEMA &&        
-    lastRSI < 45 &&                  
-    lastMACD.histogram > 0 &&
-    currentPrice < lastBB.middle &&
-    lastADX.adx > ADX_THRESHOLD;          
+  // --- SCORING SYSTEM (Target: 95% Confidence) ---
+  let score = 0;
+  let signalType = null;
 
-  if (buySignal) {
-    const tp = currentPrice * (1 + TP_PERCENT);
-    const sl = currentPrice * (1 - SL_PERCENT);
-    return { action: "BUY", price: currentPrice, tp, sl };
+  // 1. TREND CHECK (20%)
+  // Buy: Price > EMA | Sell: Price < EMA
+  if (currentPrice > lastEMA) {
+     score += 20; 
+     signalType = "BUY"; // Bias UP
+  } else {
+     score += 20;
+     signalType = "SELL"; // Bias DOWN
   }
 
-  // SELL SIGNAL (5 Indicators - STRICT)
-  // 1. Trend is Down (Price < EMA200)
-  // 2. Momentum is Overbought (RSI > 55)
-  // 3. MACD Histogram Negative
-  // 4. BB Confirmation: Price is above Middle Band (Selling the rally)
-  // 5. Trend Strength: ADX > 25 (Strong trend, avoid sideways)
-  const sellSignal = 
-    currentPrice < lastEMA &&        
-    lastRSI > 55 &&                  
-    lastMACD.histogram < 0 &&
-    currentPrice > lastBB.middle &&
-    lastADX.adx > ADX_THRESHOLD;          
+  // 2. MOMENTUM CHECK (25% - Weighted High)
+  // Strict RSI for Sniper Mode
+  if (signalType === "BUY") {
+    if (lastRSI < 40) score += 25; // Very Discounted
+  } else {
+    if (lastRSI > 60) score += 25; // Very Expensive
+  }
 
-  if (sellSignal) {
-    const tp = currentPrice * (1 - TP_PERCENT);
-    const sl = currentPrice * (1 + SL_PERCENT);
-    return { action: "SELL", price: currentPrice, tp, sl };
+  // 3. STRENGTH CHECK (15%)
+  if (lastADX.adx > ADX_THRESHOLD) score += 15;
+
+  // 4. VALUE CHECK (20%)
+  // Buy: Price < Middle Band | Sell: Price > Middle Band
+  if (signalType === "BUY") {
+    if (currentPrice < lastBB.middle) score += 20;
+  } else {
+    if (currentPrice > lastBB.middle) score += 20;
+  }
+
+  // 5. OBSERVER CHECK (20%)
+  // MACD Histogram confirms direction
+  if (signalType === "BUY") {
+    if (lastMACD.histogram > 0) score += 20;
+  } else {
+    if (lastMACD.histogram < 0) score += 20;
+  }
+
+  logger.info(`🔍 Analysis Score for ${symbol}: ${score}% (${signalType})`);
+
+  // FINAL DECISION
+  if (score >= MIN_CONFIDENCE) {
+    if (signalType === "BUY") {
+      const tp = currentPrice * (1 + TP_PERCENT);
+      const sl = currentPrice * (1 - SL_PERCENT);
+      return { action: "BUY", price: currentPrice, tp, sl, score };
+    } 
+    if (signalType === "SELL") {
+      const tp = currentPrice * (1 - TP_PERCENT);
+      const sl = currentPrice * (1 + SL_PERCENT);
+      return { action: "SELL", price: currentPrice, tp, sl, score };
+    }
   }
 
   return null;
@@ -167,8 +186,8 @@ export async function runBotLoop() {
       const result = await analyzeMarket(symbol);
 
       if (result) {
-        const { action, price, tp, sl } = result;
-        logger.info(`🔥 VALIDATED SIGNAL FOUND: ${action} ${symbol} @ ${price} (TP: ${tp.toFixed(2)}, SL: ${sl.toFixed(2)})`);
+        const { action, price, tp, sl, score } = result;
+        logger.info(`🔥 VALIDATED SIGNAL FOUND (${score}%): ${action} ${symbol} @ ${price} (TP: ${tp.toFixed(2)}, SL: ${sl.toFixed(2)})`);
 
         const riskCheck = await checkRisk();
         
