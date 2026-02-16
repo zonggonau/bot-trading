@@ -4,24 +4,24 @@ import { logger } from "./logger.js";
 import { registerTrade } from "./risk.js";
 
 // Initialize Binance Exchange instance with Testnet URLs
-// Initialize Binance Exchange instance with Spot Demo URLs (demo.binance.com)
+// Initialize Binance Exchange instance with Spot PRODUCTION URLs
 const exchange = new ccxt.binance({
   apiKey: process.env.BINANCE_API_KEY,
   secret: process.env.BINANCE_SECRET_KEY,
   enableRateLimit: true,
   options: {
-    defaultType: 'spot', // Use Spot market (Demo Mode)
+    defaultType: 'spot', // Use Spot market (Real Trading)
   },
   urls: {
     api: {
-      public: 'https://demo-api.binance.com/api',
-      private: 'https://demo-api.binance.com/api',
+      public: 'https://api.binance.com/api',
+      private: 'https://api.binance.com/api',
     },
   },
 });
 
-// Log the API URLs to verify Demo configuration
-logger.info(`Binance Configured. API Data URL: ${exchange.urls.api.public}`); 
+// Log the API URLs to verify Production configuration
+logger.info(`Binance Configured. API Data URL: ${exchange.urls.api.public} (PRODUCTION)`); 
 
 export async function executeTrade(symbol, action, price, tp, sl) {
   // Ensure keys are loaded (just in case init happened before dotenv)

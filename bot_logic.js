@@ -2,7 +2,7 @@ import axios from "axios";
 import { logger } from "./logger.js";
 import { checkRisk } from "./risk.js";
 import { executeTrade } from "./execution.js";
-import { RSI, MACD, EMA, BollingerBands } from "technicalindicators";
+import { RSI, MACD, EMA, BollingerBands, ADX } from "technicalindicators";
 
 
 // Ganti URL ini dengan API sumber sinyal/market data Anda
@@ -40,6 +40,8 @@ const MACD_SIGNAL = 9;
 const EMA_PERIOD = 200;
 const BB_PERIOD = 20;
 const BB_STD_DEV = 2;
+const ADX_PERIOD = 14;
+const ADX_THRESHOLD = 25; // Minimum strength to confirm a trend
 
 // Risk Management Settings
 const TP_PERCENT = 0.015; // Take Profit 1.5%
@@ -91,31 +93,43 @@ async function analyzeMarket(symbol) {
     values: closes
   });
 
+  // 5. Calculate Trend Strength (ADX)
+  const adx = ADX.calculate({
+    period: ADX_PERIOD,
+    high: highs,
+    low: lows,
+    close: closes
+  });
+
   // Get latest values
   const currentPrice = closes[closes.length - 1];
   const lastRSI = rsi[rsi.length - 1];
   const lastMACD = macd[macd.length - 1];
   const lastEMA = ema200[ema200.length - 1];
   const lastBB = bb[bb.length - 1];
+  const lastADX = adx[adx.length - 1];
 
   logger.info(`Validating ${symbol} ($${currentPrice}):
     - RSI: ${lastRSI.toFixed(2)}
     - MACD: Hist=${lastMACD.histogram.toFixed(4)}
     - EMA200: ${lastEMA.toFixed(2)}
-    - BB: Upper=${lastBB.upper.toFixed(2)} Lower=${lastBB.lower.toFixed(2)}`);
+    - BB: Upper=${lastBB.upper.toFixed(2)} Lower=${lastBB.lower.toFixed(2)}
+    - ADX: ${lastADX.adx.toFixed(2)} (Threshold: ${ADX_THRESHOLD})`);
 
   // STRATEGY LOGIC: 3 Indicators Only (Simplified)
   
-  // BUY SIGNAL (4 Indicators)
+  // BUY SIGNAL (5 Indicators - STRICT)
   // 1. Trend is UP (Price > EMA200)
   // 2. Momentum is Oversold (RSI < 45)
-  // 3. MACD Histogram Positive
+  // 3. MACD Histogram Positive (Reversal starting)
   // 4. BB Confirmation: Price is below Middle Band (Buying the dip)
+  // 5. Trend Strength: ADX > 25 (Strong trend, avoid sideways)
   const buySignal = 
     currentPrice > lastEMA &&        
     lastRSI < 45 &&                  
     lastMACD.histogram > 0 &&
-    currentPrice < lastBB.middle;          
+    currentPrice < lastBB.middle &&
+    lastADX.adx > ADX_THRESHOLD;          
 
   if (buySignal) {
     const tp = currentPrice * (1 + TP_PERCENT);
@@ -123,16 +137,18 @@ async function analyzeMarket(symbol) {
     return { action: "BUY", price: currentPrice, tp, sl };
   }
 
-  // SELL SIGNAL (4 Indicators)
+  // SELL SIGNAL (5 Indicators - STRICT)
   // 1. Trend is Down (Price < EMA200)
   // 2. Momentum is Overbought (RSI > 55)
   // 3. MACD Histogram Negative
   // 4. BB Confirmation: Price is above Middle Band (Selling the rally)
+  // 5. Trend Strength: ADX > 25 (Strong trend, avoid sideways)
   const sellSignal = 
     currentPrice < lastEMA &&        
     lastRSI > 55 &&                  
     lastMACD.histogram < 0 &&
-    currentPrice > lastBB.middle;          
+    currentPrice > lastBB.middle &&
+    lastADX.adx > ADX_THRESHOLD;          
 
   if (sellSignal) {
     const tp = currentPrice * (1 - TP_PERCENT);
