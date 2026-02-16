@@ -36,8 +36,9 @@ export async function executeTrade(symbol, action, price, tp, sl) {
     const side = action.toUpperCase() === "BUY" ? "buy" : "sell";
     
     // 2. Set Quantity (Dynamic based on Price)
-    // Target trade size: ~15 USDT (Safety margin above 5-10 USDT min)
-    const targetNotional = 15; 
+    // Target trade size: ~12 USDT (Fits $13 Balance & > $10 Min Order)
+    // CONFIRMED: Using Spot API v3 (No Leverage)
+    const targetNotional = 12; 
     let quantity = targetNotional / price;
     
     // Adjust to exchange precision limits
