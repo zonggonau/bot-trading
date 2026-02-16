@@ -4,7 +4,7 @@ import { logger } from "./logger.js";
 import { registerTrade } from "./risk.js";
 
 // Initialize Binance Exchange instance with Testnet URLs
-// Initialize Binance Exchange instance with Spot PRODUCTION URLs
+// Initialize Binance Exchange instance with Spot PRODUCTION Default URLs
 const exchange = new ccxt.binance({
   apiKey: process.env.BINANCE_API_KEY,
   secret: process.env.BINANCE_SECRET_KEY,
@@ -12,16 +12,10 @@ const exchange = new ccxt.binance({
   options: {
     defaultType: 'spot', // Use Spot market (Real Trading)
   },
-  urls: {
-    api: {
-      public: 'https://api.binance.com/api',
-      private: 'https://api.binance.com/api',
-    },
-  },
 });
 
 // Log the API URLs to verify Production configuration
-logger.info(`Binance Configured. API Data URL: ${exchange.urls.api.public} (PRODUCTION)`); 
+logger.info(`Binance Configured. Using Default CCXT URLs (PRODUCTION)`); 
 
 export async function executeTrade(symbol, action, price, tp, sl) {
   // Ensure keys are loaded (just in case init happened before dotenv)
@@ -35,7 +29,7 @@ export async function executeTrade(symbol, action, price, tp, sl) {
       throw new Error("API Key Missing");
   }
 
-  logger.info(`🚀 Executing REAL TESTNET Trade: ${action} ${symbol} @ ${price} [TP: ${tp}, SL: ${sl}]`);
+  logger.info(`🚀 Executing REAL PRODUCTION Trade: ${action} ${symbol} @ ${price} [TP: ${tp}, SL: ${sl}]`);
 
   try {
     // 1. Determine Order Side
