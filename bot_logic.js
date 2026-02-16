@@ -41,16 +41,17 @@ const EMA_PERIOD = 200;
 const BB_PERIOD = 20;
 const BB_STD_DEV = 2;
 const ADX_PERIOD = 14;
-const ADX_THRESHOLD = 30; // Increased for higher quality trends
+const ADX_THRESHOLD = 20; // Lower threshold for 15m Scalping flows
 const MIN_CONFIDENCE = 75; // Minimum Score to trade (75-89% Spot, 90%+ Leverage)
 
 // Risk Management Settings
 
 // Risk Management Settings
-const TP_PERCENT = 0.015; // Take Profit 1.5%
-const SL_PERCENT = 0.0075; // Stop Loss 0.75%
+// Risk Management Settings (SCALPING MODE)
+const TP_PERCENT = 0.008; // Take Profit 0.8% (Quick Scalp)
+const SL_PERCENT = 0.004; // Stop Loss 0.4% (Tight Safety)
 
-async function fetchCandles(symbol, interval = "1h", limit = 250) {
+async function fetchCandles(symbol, interval = "15m", limit = 250) {
   try {
     const response = await axios.get("https://api.binance.com/api/v3/klines", {
       params: { symbol, interval, limit }

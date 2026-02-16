@@ -46,10 +46,11 @@ export async function executeTrade(symbol, action, price, tp, sl, leverage = 1) 
     if (side === 'buy') {
         try {
             const balance = await exchange.fetchBalance();
-            const quoteAsset = symbol.replace(regex, ""); // e.g. BTCUSDT -> USDT (Approx) -> Actually split usually works better but specific usage:
-            // Standard approach: check 'USDT' balance
-            const available = balance['USDT'] ? balance['USDT'].free : 0;
+            // Assuming USDT pairs as per watchlist
+            const available = (balance['USDT'] && balance['USDT'].free) ? parseFloat(balance['USDT'].free) : 0;
             const estimatedCost = quantity * price;
+
+            logger.info(`💰 Balance Check: Available ${available} USDT. Required: ${estimatedCost.toFixed(2)} USDT`);
 
             if (estimatedCost > available) {
                 logger.warn(`⚠️ Insufficient Balance for x${leverage} ($${estimatedCost.toFixed(2)}). Capping at Max Avail ($${available.toFixed(2)})`);
