@@ -41,6 +41,30 @@ export async function executeTrade(symbol, action, price, tp, sl, leverage = 1) 
     // CONFIRMED: Using Spot API v3 (No Leverage)
     const targetNotional = 12; 
     let quantity = (targetNotional / price) * leverage; // SIMULATED LEVERAGE (Increases position size)
+
+    // --- SMART BALANCE CHECK ---
+    if (side === 'buy') {
+        try {
+            const balance = await exchange.fetchBalance();
+            const quoteAsset = symbol.replace(regex, ""); // e.g. BTCUSDT -> USDT (Approx) -> Actually split usually works better but specific usage:
+            // Standard approach: check 'USDT' balance
+            const available = balance['USDT'] ? balance['USDT'].free : 0;
+            const estimatedCost = quantity * price;
+
+            if (estimatedCost > available) {
+                logger.warn(`⚠️ Insufficient Balance for x${leverage} ($${estimatedCost.toFixed(2)}). Capping at Max Avail ($${available.toFixed(2)})`);
+                // Cap quantity to 99% of available balance (leave room for fees)
+                if (available > 10) { // Only if we have at least $10
+                    quantity = (available * 0.99) / price;
+                } else {
+                     // If really low balance, try anyway or throw? Let's try what we have.
+                     quantity = (available * 0.99) / price; 
+                }
+            }
+        } catch (balErr) {
+            logger.warn(`Failed to fetch balance, proceeding with calculated qty: ${balErr.message}`);
+        }
+    }
     
     // Adjust to exchange precision limits
     // Need to load markets first to get precision info, but for speed we can try a generic approach or load once.
