@@ -2,6 +2,7 @@ import "dotenv/config";
 import ccxt from "ccxt";
 import { logger } from "./logger.js";
 import { registerTrade } from "./risk.js";
+import { sendNotification } from "./notification.js";
 
 // Initialize Binance Exchange instance with Testnet URLs
 // Initialize Binance Exchange instance with Spot PRODUCTION Default URLs
@@ -104,6 +105,10 @@ export async function executeTrade(symbol, action, price, tp, sl) {
 
     // 4. Register in Local DB
     await registerTrade(symbol, action, order.price || price);
+
+    // 5. Send Notification
+    const tradeDetails = `Action: **${action}**\nSymbol: **${symbol}**\nPrice: **$${order.price || price}**\nQuantity: **${quantity}**\nTake Profit: **$${tp}**\nStop Loss: **$${sl}**\nOrder ID: \`${order.id}\``;
+    await sendNotification(`Trade Executed: ${action} ${symbol}`, tradeDetails);
 
     return {
       status: "filled",

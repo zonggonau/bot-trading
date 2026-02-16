@@ -42,7 +42,7 @@ const BB_PERIOD = 20;
 const BB_STD_DEV = 2;
 const ADX_PERIOD = 14;
 const ADX_THRESHOLD = 30; // Increased for higher quality trends
-const MIN_CONFIDENCE = 95; // Minimum Score to trade
+const MIN_CONFIDENCE = 80; // Minimum Score to trade
 
 // Risk Management Settings
 
@@ -178,9 +178,78 @@ async function analyzeMarket(symbol) {
   return null;
 }
 
+// Basic Idempotency: Track processed signal IDs to avoid duplicates
+const processedSignalIds = new Set();
+
+async function pollExternalSignals() {
+  const url = process.env.EXTERNAL_SIGNAL_URL;
+  if (!url) return;
+
+  try {
+    const response = await axios.get(url, { timeout: 5000 });
+    const data = response.data;
+    const signals = Array.isArray(data) ? data : [data];
+
+    for (const signal of signals) {
+      if (!signal || !signal.symbol || !signal.action) continue;
+
+      // Prevent duplicate processing if ID is provided
+      if (signal.id && processedSignalIds.has(signal.id)) continue;
+      if (signal.id) processedSignalIds.add(signal.id);
+
+      const { symbol, action, price, tp, sl } = signal;
+      logger.info(`📥 External Signal Received: ${action} ${symbol}`);
+      
+      const riskCheck = await checkRisk();
+      if (riskCheck.allowed) {
+          let execPrice = price; 
+          
+          // Fetch current price if missing
+          if (!execPrice) {
+             const candles = await fetchCandles(symbol, "1m", 1);
+             if (candles && candles.length > 0) {
+                 execPrice = candles[0].close;
+             } else {
+                 logger.warn(`Skipping external signal ${symbol}: Price fetch failed`);
+                 continue;
+             }
+          }
+          
+          let execTp = tp;
+          let execSl = sl;
+          // Calculate TP/SL if missing
+          if (!execTp || !execSl) {
+              if (action.toUpperCase() === 'BUY') {
+                  execTp = execPrice * (1 + TP_PERCENT);
+                  execSl = execPrice * (1 - SL_PERCENT);
+              } else {
+                   execTp = execPrice * (1 - TP_PERCENT);
+                   execSl = execPrice * (1 + SL_PERCENT);
+              }
+          }
+
+          // Execute
+          await executeTrade(symbol, action, execPrice, execTp, execSl);
+          logger.info(`✅ External Trade Executed: ${symbol}`);
+      } else {
+          logger.warn(`⛔ External Trade Blocked: ${riskCheck.reason}`);
+      }
+    }
+  } catch (error) {
+    // Ignore 404/empty to avoid log spam if no signals
+    if (error.response && error.response.status !== 404) {
+        logger.warn(`External Signal Poll Failed: ${error.message}`);
+    }
+  }
+}
+
 export async function runBotLoop() {
   logger.info("🤖 Starting Bot Loop Analysis...");
 
+  // 1. Check External Signals First
+  await pollExternalSignals();
+
+  // 2. Run Internal Technical Analysis
   for (const symbol of WATCHLIST) {
     try {
       const result = await analyzeMarket(symbol);
