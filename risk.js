@@ -34,14 +34,25 @@ export async function checkRisk() {
   return { allowed: true };
 }
 
-export async function registerTrade(symbol, action, price) {
+export async function registerTrade(trade) {
   const db = await getDB();
   const today = new Date().toISOString().split('T')[0];
+  
+  const { 
+    symbol, action, price, quantity, sl: stop_loss, tp: take_profit, score,
+    rsi, macd, stoch_k, stoch_d
+  } = trade;
 
   try {
     await db.run(
-      "INSERT INTO trades (symbol, action, price, status) VALUES (?, ?, ?, 'OPEN')",
-      [symbol, action, price]
+      `INSERT INTO trades (
+        symbol, action, price, quantity, stop_loss, take_profit, status,
+        score, rsi_value, macd_histogram, stoch_k, stoch_d
+      ) VALUES (?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?)`,
+      [
+        symbol, action, price, quantity, stop_loss, take_profit,
+        score, rsi, macd, stoch_k, stoch_d
+      ]
     );
 
     // Initialize daily stats if not exists

@@ -3,6 +3,7 @@ import ccxt from "ccxt";
 import { logger } from "./logger.js";
 import { registerTrade } from "./risk.js";
 import { sendNotification } from "./notification.js";
+import { config } from "./config.js";
 
 // Initialize Binance Exchange instance with Testnet URLs
 // Initialize Binance Exchange instance with Spot PRODUCTION Default URLs
@@ -18,155 +19,101 @@ const exchange = new ccxt.binance({
 // Log the API URLs to verify Production configuration
 logger.info(`Binance Configured. Using Default CCXT URLs (PRODUCTION)`); 
 
-export async function executeTrade(symbol, action, price, tp, sl, leverage = 1) {
-  // Ensure keys are loaded (just in case init happened before dotenv)
+export async function executeTrade(tradeData) {
+  const { symbol, action, price, tp, sl, leverage = 1 } = tradeData;
+
+  // Ensure keys are loaded
   if (!exchange.apiKey || !exchange.secret) {
      exchange.apiKey = process.env.BINANCE_API_KEY;
      exchange.secret = process.env.BINANCE_SECRET_KEY;
   }
-  
   if (!exchange.apiKey) {
       logger.error("❌ API KEY MISSING in executeTrade! Check .env file.");
       throw new Error("API Key Missing");
   }
 
-  logger.info(`🚀 Executing REAL PRODUCTION Trade: ${action} ${symbol} @ ${price} [TP: ${tp}, SL: ${sl}] (Lev: x${leverage})`);
+  logger.info(`🚀 Executing Trade: ${action} ${symbol} @ ${price} [TP: ${tp}, SL: ${sl}]`);
 
   try {
-    // 1. Determine Order Side
     const side = action.toUpperCase() === "BUY" ? "buy" : "sell";
-    
-    // 2. Set Quantity (Dynamic based on Price)
-    // Target trade size: ~12 USDT (Fits $13 Balance & > $10 Min Order)
-    // CONFIRMED: Using Spot API v3 (No Leverage)
-    const targetNotional = 12; 
-    let quantity = (targetNotional / price) * leverage; // SIMULATED LEVERAGE (Increases position size)
+    let quantity;
 
-    // --- SMART BALANCE CHECK ---
-    if (side === 'buy') {
-        try {
-            const balance = await exchange.fetchBalance();
-            // Assuming USDT pairs as per watchlist
-            const available = (balance['USDT'] && balance['USDT'].free) ? parseFloat(balance['USDT'].free) : 0;
-            const estimatedCost = quantity * price;
+    // --- DYNAMIC RISK-BASED POSITION SIZING ---
+    try {
+      const balance = await exchange.fetchBalance();
+      const equity = (balance['USDT'] && balance['USDT'].free) ? parseFloat(balance['USDT'].free) : 0;
+      logger.info(`💰 Total Equity (USDT): ${equity.toFixed(2)}`);
 
-            logger.info(`💰 Balance Check: Available ${available} USDT. Required: ${estimatedCost.toFixed(2)} USDT`);
+      const riskAmount = equity * config.RISK_PER_TRADE;
+      const slDistance = Math.abs(price - sl);
 
-            if (estimatedCost > available) {
-                logger.warn(`⚠️ Insufficient Balance for x${leverage} ($${estimatedCost.toFixed(2)}). Capping at Max Avail ($${available.toFixed(2)})`);
-                // Cap quantity to 99% of available balance (leave room for fees)
-                if (available > 10) { // Only if we have at least $10
-                    quantity = (available * 0.99) / price;
-                } else {
-                     // If really low balance, try anyway or throw? Let's try what we have.
-                     quantity = (available * 0.99) / price; 
-                }
-            }
-        } catch (balErr) {
-            logger.warn(`Failed to fetch balance, proceeding with calculated qty: ${balErr.message}`);
-        }
+      if (equity > 10 && slDistance > 0) { // Min equity check and avoid division by zero
+        quantity = riskAmount / slDistance;
+        logger.info(`🎯 Dynamic Sizing: Risking ${riskAmount.toFixed(2)} USDT (${config.RISK_PER_TRADE * 100}% of Equity). SL Distance: ${slDistance.toFixed(4)}. Calculated Qty: ${quantity}`);
+      } else {
+        // Fallback to fixed notional size if SL is too close or balance is low
+        quantity = config.TARGET_NOTIONAL_USDT / price;
+        logger.warn(`⚠️ SL distance too small or low balance. Falling back to fixed notional size. Qty: ${quantity}`);
+      }
+    } catch (balErr) {
+      quantity = config.TARGET_NOTIONAL_USDT / price;
+      logger.warn(`Failed to fetch balance for dynamic sizing: ${balErr.message}. Using fixed notional size. Qty: ${quantity}`);
     }
     
-    // Adjust to exchange precision limits
-    // Need to load markets first to get precision info, but for speed we can try a generic approach or load once.
-    // Ideally: await exchange.loadMarkets(); inside init.
-    // Here we will use CCXT's built-in precision handling if markets are loaded, or a safe fallback.
-    
-    // Hack: Round to 0 decimals for low value coins (ALGO, XRP, DOGE), 2-3 for high value.
-    if (price < 1) quantity = Math.floor(quantity); // e.g. ALGO 0.1 -> qty 150
-    else if (price < 10) quantity = parseFloat(quantity.toFixed(1));
-    else if (price < 1000) quantity = parseFloat(quantity.toFixed(2));
-    else quantity = parseFloat(quantity.toFixed(3)); // BTC, ETH
+    // Adjust to exchange precision limits (simple rounding, can be improved by fetching market data)
+    await exchange.loadMarkets();
+    quantity = exchange.amountToPrecision(symbol, quantity);
 
-    // Ensure minimums for specific coins based on error log
-    if (symbol.includes("BTC")) quantity = Math.max(quantity, 0.001);
-    if (symbol.includes("ETH")) quantity = Math.max(quantity, 0.01);
+    logger.info(`Final Quantity after precision adjustment: ${quantity}`);
+
+    // Ensure minimums
+    const cost = quantity * price;
+    if (cost < 10) {
+      logger.error(`❌ Order value is less than 10 USDT (value: ${cost.toFixed(2)}). Aborting.`);
+      throw new Error("Order value too low");
+    }
 
     // 3. Send Main Order
     const order = await exchange.createMarketOrder(symbol, side, quantity);
-    logger.info(`✅ Main Order Placed! ID: ${order.id}`);
+    logger.info(`✅ Main Order Placed! ID: ${order.id}, Qty: ${order.amount}`);
 
-    // 4. Place TP/SL Orders (if main order successful)
+    // 4. Place TP/SL Orders (OCO for Spot)
     if (tp && sl) {
       try {
-        const exitSide = side === 'buy' ? 'sell' : 'buy';
-        const isSpot = exchange.options.defaultType === 'spot';
-
-        if (isSpot) {
-          // SPOT MARKET: Use OCO (One-Cancels-the-Other)
-          // OCO allows placing both a Limit Maker (TP) and a Stop Limit (SL) simultaneously.
-          // If one is triggered, the other is canceled.
-          try {
-             const ocoSide = side === 'buy' ? 'sell' : 'buy';
-             // Price = TP (Limit Maker)
-             // StopPrice = SL Trigger
-             // StopLimitPrice = SL Limit execution price
-             
-             // Ensure prices are correctly formatted strings/numbers for CCXT
-             // For SELL OCO (Exit Buy):
-             // Price (TP) must be > Current Price
-             // Stop Price (SL) must be < Current Price
-             
-             await exchange.privatePostOrderOco({
-                symbol: symbol.replace('/', ''), // Binance requires symbol without slash e.g. BTCUSDT
-                side: ocoSide.toUpperCase(), 
-                quantity: quantity,
-                price: tp,               // Take Profit Price (Limit)
-                stopPrice: sl,           // Stop Loss Trigger
-                stopLimitPrice: sl,      // Stop Loss Limit Price (executed)
-                stopLimitTimeInForce: 'GTC'
-             });
-             
-             logger.info(`✅ OCO Order Placed! TP: ${tp}, SL: ${sl}`);
-          } catch (ocoError) {
-             logger.error(`❌ OCO Failed: ${ocoError.message}. Fallback to SL only.`);
-             // Fallback: Just SL if OCO fails (e.g. price distance rules)
-             await exchange.createOrder(symbol, 'STOP_LOSS_LIMIT', side === 'buy' ? 'sell' : 'buy', quantity, sl, {
-                'stopPrice': sl,
-                'timeInForce': 'GTC'
-             });
-          } 
-
-        } else {
-          // FUTURES MARKET
-          // Stop Loss Order
-          await exchange.createOrder(symbol, 'STOP_MARKET', exitSide, quantity, undefined, {
-            'stopPrice': sl,
-            'closePosition': true // Reduce Only
-          });
-          logger.info(`🛡️ Stop Loss set at ${sl}`);
-
-          // Take Profit Order
-          await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', exitSide, quantity, undefined, {
-            'stopPrice': tp,
-            'closePosition': true // Reduce Only
-          });
-          logger.info(`💰 Take Profit set at ${tp}`);
-        }
-        
-      } catch (err) {
-        logger.warn(`⚠️ Failed to set TP/SL: ${err.message}`);
+         const ocoAmount = exchange.amountToPrecision(symbol, order.amount);
+         await exchange.privatePostOrderOco({
+            symbol: symbol.replace('/', ''),
+            side: side === 'buy' ? 'SELL' : 'BUY', 
+            quantity: ocoAmount, // Use the actual executed quantity
+            price: exchange.priceToPrecision(symbol, tp),
+            stopPrice: exchange.priceToPrecision(symbol, sl),
+            stopLimitPrice: exchange.priceToPrecision(symbol, sl),
+            stopLimitTimeInForce: 'GTC'
+         });
+         logger.info(`✅ OCO Order Placed! TP: ${tp}, SL: ${sl}`);
+      } catch (ocoError) {
+         logger.error(`❌ OCO Failed: ${ocoError.message}. Manual monitoring required.`);
       }
     }
 
-    // 4. Register in Local DB
-    await registerTrade(symbol, action, order.price || price);
+    // 5. Register in Local DB
+    const finalTradeData = { ...tradeData, quantity: order.amount, price: order.price || price };
+    await registerTrade(finalTradeData);
 
-    // 5. Send Notification
-    const tradeDetails = `Action: **${action}**\nSymbol: **${symbol}**\nAvg Price: **$${order.price || price}**\nQty: **${quantity}**\nLeverage: **x${leverage}**\nTP: **$${tp}**\nSL: **$${sl}**\nID: \`${order.id}\``;
-    await sendNotification(`Trade Executed: ${action} ${symbol} (x${leverage})`, tradeDetails);
+    // 6. Send Notification
+    const tradeDetails = `Action: **${action}**\nSymbol: **${symbol}**\nAvg Price: **$${finalTradeData.price}**\nQty: **${finalTradeData.quantity}**\nTP: **$${tp}**\nSL: **$${sl}**\nScore: **${tradeData.score}%**`;
+    await sendNotification(`Trade Executed: ${action} ${symbol}`, tradeDetails);
 
     return {
       status: "filled",
       orderId: order.id,
-      symbol,
-      action,
-      qty: quantity,
-      price: order.price
+      ...finalTradeData
     };
 
   } catch (error) {
     logger.error(`❌ Order Failed: ${error.message}`);
+    // Potentially send a failure notification
+    await sendNotification(`Trade FAILED: ${action} ${symbol}`, `Error: ${error.message}`);
     throw error;
   }
 }
