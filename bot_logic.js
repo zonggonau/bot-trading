@@ -2,7 +2,7 @@ import axios from "axios";
 import { logger } from "./logger.js";
 import { checkRisk } from "./risk.js";
 import { executeTrade } from "./execution.js";
-import { RSI, MACD, EMA, BollingerBands, ADX } from "technicalindicators";
+import { RSI, MACD, EMA, BollingerBands, ADX, StochasticRSI } from "technicalindicators";
 
 
 // Ganti URL ini dengan API sumber sinyal/market data Anda
@@ -17,23 +17,16 @@ const WATCHLIST = [
   "SOLUSDT", // Solana
   "XRPUSDT", // Ripple
   "DOGEUSDT", // Dogecoin
-  "MATICUSDT", // Polygon
   "LTCUSDT", // Litecoin
   "DOTUSDT", // Polkadot
   "AVAXUSDT", // Avalanche
-  "LINKUSDT", // Chainlink
-  "UNIUSDT", // Uniswap
-  "ATOMUSDT", // Cosmos
-  "ALGOUSDT", // Algorand
-  "FILUSDT", // Filecoin
-  "ICPUSDT", // Internet Computer
-  "NEARUSDT", // NEAR Protocol
-  "TONUSDT", // Toncoin
-  "APTUSDT"  // Aptos
 ];
 
 // Konfigurasi Indikator (SCALPING 1-5m Optimized)
 const RSI_PERIOD = 9; // Dipercepat untuk respon 1-5 menit
+const STOCHRSI_PERIOD = 14; 
+const STOCHRSI_K = 3;
+const STOCHRSI_D = 3;
 const MACD_FAST = 6;  // Fast MACD
 const MACD_SLOW = 13; // Slow MACD
 const MACD_SIGNAL = 4; // Signal
@@ -42,13 +35,13 @@ const BB_PERIOD = 20;
 const BB_STD_DEV = 2;
 const ADX_PERIOD = 14;
 const ADX_THRESHOLD = 20; 
-const MIN_CONFIDENCE = 80; // Butuh konfirmasi kuat untuk Scalping
+const MIN_CONFIDENCE = 80; // Diubah kembali ke 60% sesuai request
 
 // Risk Management Settings (SCALPING 1-5 MENIT)
 const TP_PERCENT = 0.005; // Take Profit 0.5% (Cepat keluar)
 const SL_PERCENT = 0.003; // Stop Loss 0.3% (Cut loss ketat)
 
-async function fetchCandles(symbol, interval = "5m", limit = 100) {
+async function fetchCandles(symbol, interval = "5m", limit = 200) {
   try {
     const response = await axios.get("https://api.binance.com/api/v3/klines", {
       params: { symbol, interval, limit }
@@ -69,7 +62,7 @@ async function fetchCandles(symbol, interval = "5m", limit = 100) {
 
 async function analyzeMarket(symbol) {
   // Main di TF 5 Menit (bisa juga 1m, tapi 5m lebih stabil untuk bot)
-  const candles = await fetchCandles(symbol, "5m");
+  const candles = await fetchCandles(symbol, "5m", 200);
   if (candles.length < 50) return null;
 
   const closes = candles.map(c => c.close);
@@ -78,6 +71,13 @@ async function analyzeMarket(symbol) {
   
   // 1. Calculate Indicators
   const rsi = RSI.calculate({ values: closes, period: RSI_PERIOD });
+  const stochRsi = StochasticRSI.calculate({
+    values: closes,
+    rsiPeriod: STOCHRSI_PERIOD,
+    stochasticPeriod: STOCHRSI_PERIOD,
+    kPeriod: STOCHRSI_K,
+    dPeriod: STOCHRSI_D
+  });
   const macd = MACD.calculate({
     values: closes,
     fastPeriod: MACD_FAST,
@@ -102,6 +102,7 @@ async function analyzeMarket(symbol) {
   // Get latest values
   const currentPrice = closes[closes.length - 1];
   const lastRSI = rsi[rsi.length - 1];
+  const lastStochRSI = stochRsi[stochRsi.length - 1] || { k: 50, d: 50 }; // Fallback
   const lastMACD = macd[macd.length - 1];
   const lastEMA = ema50[ema50.length - 1];
   const lastBB = bb[bb.length - 1];
@@ -109,12 +110,6 @@ async function analyzeMarket(symbol) {
 
   // Pastikan indikator ready
   if(!lastRSI || !lastMACD || !lastEMA || !lastBB) return null;
-
-  logger.info(`Analisa Scalping ${symbol} ($${currentPrice}):
-    - RSI(9): ${lastRSI.toFixed(2)}
-    - MACD: ${lastMACD.histogram.toFixed(4)}
-    - EMA(50): ${lastEMA.toFixed(2)}
-    - BB Pos: ${currentPrice < lastBB.lower ? "LOW" : (currentPrice > lastBB.upper ? "HIGH" : "MID")}`);
 
   // --- SCALPING SCORING SYSTEM (Max Score ~120) ---
   // Threshold: 80% (Requires Trend + Momentum + Confirmation)
@@ -130,15 +125,21 @@ async function analyzeMarket(symbol) {
   }
   score += 25; // Trend is mandatory basis for direction
 
-  // 2. MOMENTUM ENTRY (RSI) (Max 30 Poin)
+  // 2. MOMENTUM ENTRY (RSI + StochRSI) (Max 30 Poin)
   if (signalType === "BUY") {
       // Buy saat pullback (RSI Oversold)
-      if (lastRSI < 45) score += 20; // Good Entry
-      if (lastRSI < 30) score += 10; // Perfect Entry
+      if (lastRSI < 45) score += 10; 
+      if (lastRSI < 30) score += 5; // Extra points for deep oversold
+      
+      // StochRSI Cross Up from Oversold (Golden Cross)
+      if (lastStochRSI.k < 20 && lastStochRSI.k > lastStochRSI.d) score += 15;
   } else {
       // Sell saat rally (RSI Overbought)
-      if (lastRSI > 55) score += 20;
-      if (lastRSI > 70) score += 10;
+      if (lastRSI > 55) score += 10;
+      if (lastRSI > 70) score += 5;
+
+      // StochRSI Cross Down from Overbought (Death Cross)
+      if (lastStochRSI.k > 80 && lastStochRSI.k < lastStochRSI.d) score += 15;
   }
 
   // 3. CONFIRMATION (MACD) (25 Poin)
@@ -162,13 +163,24 @@ async function analyzeMarket(symbol) {
   // ADX Trending Strength (20 Poin)
   if (lastADX.adx > 20) score += 20;
 
-  logger.info(`⚡ Scalp Score ${symbol}: ${score}% (${signalType})`);
+  // Logger hanya muncul jika Score >= 80 (Sesuai Request User)
+  if (score >= 80) {
+      logger.info(`Analisa Scalping ${symbol} ($${currentPrice}):
+        - RSI(9): ${lastRSI.toFixed(2)}
+        - StochRSI(14): K=${lastStochRSI.k.toFixed(2)} D=${lastStochRSI.d.toFixed(2)}
+        - MACD: ${lastMACD.histogram.toFixed(4)}
+        - EMA(50): ${lastEMA.toFixed(2)}
+        - BB Pos: ${currentPrice < lastBB.lower ? "LOW" : (currentPrice > lastBB.upper ? "HIGH" : "MID")}`);
+      
+      logger.info(`⚡ Scalp Score ${symbol}: ${score}% (${signalType})`);
+  }
 
   // RESULT (Must be >= 80)
   if (score >= 80) {
-    // Leverage agresif untuk score tinggi (95+)
-    const leverage = score >= 95 ? 5 : 1; 
+    // Leverage dinonaktifkan sesuai request (Spot Only)
+    const leverage = 1; 
     
+    // Automatic TP/SL Calculation
     if (signalType === "BUY") {
       const tp = currentPrice * (1 + TP_PERCENT);
       const sl = currentPrice * (1 - SL_PERCENT);
@@ -186,6 +198,8 @@ async function analyzeMarket(symbol) {
 
 // Basic Idempotency: Track processed signal IDs to avoid duplicates
 const processedSignalIds = new Set();
+const lastTradeTimes = new Map(); // Cooldown tracker
+const COOLDOWN_MS = 15 * 60 * 1000; // 15 Minutes cooldown between same-symbol trades
 
 async function pollExternalSignals() {
   const url = process.env.EXTERNAL_SIGNAL_URL;
@@ -258,6 +272,13 @@ export async function runBotLoop() {
   // 2. Run Internal Technical Analysis
   for (const symbol of WATCHLIST) {
     try {
+      // Cooldown Check
+      const lastTrade = lastTradeTimes.get(symbol);
+      if (lastTrade && (Date.now() - lastTrade) < COOLDOWN_MS) {
+          // logger.debug(`Skipping ${symbol} (Cooldown)`); // Optional generic log
+          continue; 
+      }
+
       const result = await analyzeMarket(symbol);
 
       if (result) {
@@ -269,12 +290,13 @@ export async function runBotLoop() {
         if (riskCheck.allowed) {
           const { leverage } = result;
           await executeTrade(symbol, action, price, tp, sl, leverage);
+          lastTradeTimes.set(symbol, Date.now()); // Set cooldown
           logger.info(`✅ Trade Executed: ${action} ${symbol} (x${leverage})`);
         } else {
           logger.warn(`⛔ Trade Blocked by Risk Manager: ${riskCheck.reason}`);
         }
       } else {
-        logger.info(`Creating bot... No Signal for ${symbol}`);
+        // Silent (No Signal < 80%)
       }
 
     } catch (error) {

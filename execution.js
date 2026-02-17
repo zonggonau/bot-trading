@@ -93,18 +93,39 @@ export async function executeTrade(symbol, action, price, tp, sl, leverage = 1) 
         const isSpot = exchange.options.defaultType === 'spot';
 
         if (isSpot) {
-          // SPOT MARKET: Use OCO (One-Cancels-the-Other) if possible, or simple Limits
-          // Note: OCO is complex in CCXT. Let's try separate orders but expect balance errors if we try both.
-          // For safety/simplicity in this demo: Just place a STOP LOSS LIMIT order.
-          
-          await exchange.createOrder(symbol, 'STOP_LOSS_LIMIT', exitSide, quantity, sl, {
-            'stopPrice': sl,
-            'timeInForce': 'GTC'
-          });
-          logger.info(`🛡️ Spot Stop Loss Limit set at ${sl}`);
-          
-          // TP as simple Limit Order (might fail if balance locked by SL)
-          // await exchange.createOrder(symbol, 'LIMIT', exitSide, quantity, tp); 
+          // SPOT MARKET: Use OCO (One-Cancels-the-Other)
+          // OCO allows placing both a Limit Maker (TP) and a Stop Limit (SL) simultaneously.
+          // If one is triggered, the other is canceled.
+          try {
+             const ocoSide = side === 'buy' ? 'sell' : 'buy';
+             // Price = TP (Limit Maker)
+             // StopPrice = SL Trigger
+             // StopLimitPrice = SL Limit execution price
+             
+             // Ensure prices are correctly formatted strings/numbers for CCXT
+             // For SELL OCO (Exit Buy):
+             // Price (TP) must be > Current Price
+             // Stop Price (SL) must be < Current Price
+             
+             await exchange.privatePostOrderOco({
+                symbol: symbol.replace('/', ''), // Binance requires symbol without slash e.g. BTCUSDT
+                side: ocoSide.toUpperCase(), 
+                quantity: quantity,
+                price: tp,               // Take Profit Price (Limit)
+                stopPrice: sl,           // Stop Loss Trigger
+                stopLimitPrice: sl,      // Stop Loss Limit Price (executed)
+                stopLimitTimeInForce: 'GTC'
+             });
+             
+             logger.info(`✅ OCO Order Placed! TP: ${tp}, SL: ${sl}`);
+          } catch (ocoError) {
+             logger.error(`❌ OCO Failed: ${ocoError.message}. Fallback to SL only.`);
+             // Fallback: Just SL if OCO fails (e.g. price distance rules)
+             await exchange.createOrder(symbol, 'STOP_LOSS_LIMIT', side === 'buy' ? 'sell' : 'buy', quantity, sl, {
+                'stopPrice': sl,
+                'timeInForce': 'GTC'
+             });
+          } 
 
         } else {
           // FUTURES MARKET

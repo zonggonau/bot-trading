@@ -87,3 +87,17 @@ export async function closeTrade(tradeId, profitLoss) {
     throw error;
   }
 }
+
+export async function hasOpenPosition(symbol) {
+  const db = await getDB();
+  try {
+    const result = await db.get(
+      "SELECT count(*) as count FROM trades WHERE symbol = ? AND status = 'OPEN'",
+      [symbol]
+    );
+    return result && result.count > 0;
+  } catch (error) {
+    logger.error(`Failed to check open position for ${symbol}`, error);
+    return true; // Fail safe: assume open to prevent duplicates
+  }
+}
