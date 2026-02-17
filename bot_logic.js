@@ -32,26 +32,23 @@ const WATCHLIST = [
   "APTUSDT"  // Aptos
 ];
 
-// Konfigurasi Indikator
-const RSI_PERIOD = 14;
-const MACD_FAST = 12;
-const MACD_SLOW = 26;
-const MACD_SIGNAL = 9;
-const EMA_PERIOD = 200;
+// Konfigurasi Indikator (SCALPING 1-5m Optimized)
+const RSI_PERIOD = 9; // Dipercepat untuk respon 1-5 menit
+const MACD_FAST = 6;  // Fast MACD
+const MACD_SLOW = 13; // Slow MACD
+const MACD_SIGNAL = 4; // Signal
+const EMA_PERIOD = 50; // EMA 50 untuk Trend Jangka Pendek
 const BB_PERIOD = 20;
 const BB_STD_DEV = 2;
 const ADX_PERIOD = 14;
-const ADX_THRESHOLD = 20; // Lower threshold for 15m Scalping flows
-const MIN_CONFIDENCE = 75; // Minimum Score to trade (75-89% Spot, 90%+ Leverage)
+const ADX_THRESHOLD = 20; 
+const MIN_CONFIDENCE = 80; // Butuh konfirmasi kuat untuk Scalping
 
-// Risk Management Settings
+// Risk Management Settings (SCALPING 1-5 MENIT)
+const TP_PERCENT = 0.005; // Take Profit 0.5% (Cepat keluar)
+const SL_PERCENT = 0.003; // Stop Loss 0.3% (Cut loss ketat)
 
-// Risk Management Settings
-// Risk Management Settings (SCALPING MODE)
-const TP_PERCENT = 0.008; // Take Profit 0.8% (Quick Scalp)
-const SL_PERCENT = 0.004; // Stop Loss 0.4% (Tight Safety)
-
-async function fetchCandles(symbol, interval = "15m", limit = 250) {
+async function fetchCandles(symbol, interval = "5m", limit = 100) {
   try {
     const response = await axios.get("https://api.binance.com/api/v3/klines", {
       params: { symbol, interval, limit }
@@ -71,14 +68,15 @@ async function fetchCandles(symbol, interval = "15m", limit = 250) {
 }
 
 async function analyzeMarket(symbol) {
-  const candles = await fetchCandles(symbol);
-  if (candles.length < 200) return null;
+  // Main di TF 5 Menit (bisa juga 1m, tapi 5m lebih stabil untuk bot)
+  const candles = await fetchCandles(symbol, "5m");
+  if (candles.length < 50) return null;
 
   const closes = candles.map(c => c.close);
   const highs = candles.map(c => c.high);
   const lows = candles.map(c => c.low);
   
-  // 1. Calculate Primary Indicators (3)
+  // 1. Calculate Indicators
   const rsi = RSI.calculate({ values: closes, period: RSI_PERIOD });
   const macd = MACD.calculate({
     values: closes,
@@ -88,16 +86,12 @@ async function analyzeMarket(symbol) {
     SimpleMAOscillator: false,
     SimpleMASignal: false
   });
-  const ema200 = EMA.calculate({ period: EMA_PERIOD, values: closes });
-  
-  // 4. Calculate Validation Indicator (Bollinger Bands)
+  const ema50 = EMA.calculate({ period: EMA_PERIOD, values: closes }); // Trend Filter
   const bb = BollingerBands.calculate({
     period: BB_PERIOD, 
     stdDev: BB_STD_DEV,
     values: closes
   });
-
-  // 5. Calculate Trend Strength (ADX)
   const adx = ADX.calculate({
     period: ADX_PERIOD,
     high: highs,
@@ -109,67 +103,75 @@ async function analyzeMarket(symbol) {
   const currentPrice = closes[closes.length - 1];
   const lastRSI = rsi[rsi.length - 1];
   const lastMACD = macd[macd.length - 1];
-  const lastEMA = ema200[ema200.length - 1];
+  const lastEMA = ema50[ema50.length - 1];
   const lastBB = bb[bb.length - 1];
   const lastADX = adx[adx.length - 1];
 
-  logger.info(`Validating ${symbol} ($${currentPrice}):
-    - RSI: ${lastRSI.toFixed(2)}
-    - MACD: Hist=${lastMACD.histogram.toFixed(4)}
-    - BB: Upper=${lastBB.upper.toFixed(2)} Lower=${lastBB.lower.toFixed(2)}
-    - ADX: ${lastADX.adx.toFixed(2)}`);
+  // Pastikan indikator ready
+  if(!lastRSI || !lastMACD || !lastEMA || !lastBB) return null;
 
-  // --- SCORING SYSTEM (Target: 95% Confidence) ---
+  logger.info(`Analisa Scalping ${symbol} ($${currentPrice}):
+    - RSI(9): ${lastRSI.toFixed(2)}
+    - MACD: ${lastMACD.histogram.toFixed(4)}
+    - EMA(50): ${lastEMA.toFixed(2)}
+    - BB Pos: ${currentPrice < lastBB.lower ? "LOW" : (currentPrice > lastBB.upper ? "HIGH" : "MID")}`);
+
+  // --- SCALPING SCORING SYSTEM ---
   let score = 0;
   let signalType = null;
 
-  // 1. TREND CHECK (20%)
-  // Buy: Price > EMA | Sell: Price < EMA
+  // 1. TENTUKAN BIAS (Trend Follow Scalping)
+  // Harga di atas EMA 50 = Bias BUY
+  // Harga di bawah EMA 50 = Bias SELL
   if (currentPrice > lastEMA) {
-     score += 20; 
-     signalType = "BUY"; // Bias UP
+     signalType = "BUY";
   } else {
-     score += 20;
-     signalType = "SELL"; // Bias DOWN
+     signalType = "SELL";
   }
 
-  // 2. MOMENTUM CHECK (25% - Weighted High)
-  // Strict RSI for Sniper Mode
+  // 2. MOMENTUM ENTRY (RSI & BB) (40 Poin)
   if (signalType === "BUY") {
-    if (lastRSI < 40) score += 25; // Very Discounted
+      // Buy saat pullback (RSI Oversold atau menyentuh BB Lower)
+      if (lastRSI < 40) score += 20; 
+      if (lastRSI < 30) score += 10; // Extra score for extreme oversold
+      if (currentPrice <= lastBB.lower * 1.002) score += 20; // Dekat Lower Band
   } else {
-    if (lastRSI > 60) score += 25; // Very Expensive
+      // Sell saat rally (RSI Overbought atau menyentuh BB Upper)
+      if (lastRSI > 60) score += 20;
+      if (lastRSI > 70) score += 10; // Extra score for extreme overbought
+      if (currentPrice >= lastBB.upper * 0.998) score += 20; // Dekat Upper Band
   }
 
-  // 3. STRENGTH CHECK (15%)
-  if (lastADX.adx > ADX_THRESHOLD) score += 15;
-
-  // 4. VALUE CHECK (20%)
-  // Buy: Price < Middle Band | Sell: Price > Middle Band
+  // 3. CONFIRMATION (MACD) (30 Poin)
+  // Reversal tanda histogram mulai membalik
   if (signalType === "BUY") {
-    if (currentPrice < lastBB.middle) score += 20;
+      // Histogram naik atau positif
+      if (lastMACD.histogram > lastMACD.signal) score += 15;
+      if (lastMACD.histogram > 0) score += 15;
   } else {
-    if (currentPrice > lastBB.middle) score += 20;
+      // Histogram turun atau negatif
+      if (lastMACD.histogram < lastMACD.signal) score += 15;
+      if (lastMACD.histogram < 0) score += 15;
   }
 
-  // 5. OBSERVER CHECK (20%)
-  // MACD Histogram confirms direction
+  // 4. TREND STRENGTH (ADX) (10 Poin)
+  // Scalping lebih aman saat ada volatilitas/trend
+  if (lastADX.adx > 15) score += 10;
+
+  // 5. PRICE ACTION (20 Poin)
+  // Breakout confirmation (simple logic)
   if (signalType === "BUY") {
-    if (lastMACD.histogram > 0) score += 20;
+      if(currentPrice > lastBB.middle) score += 10; // Strong buy zone
   } else {
-    if (lastMACD.histogram < 0) score += 20;
+      if(currentPrice < lastBB.middle) score += 10; // Strong sell zone
   }
 
-  logger.info(`🔍 Analysis Score for ${symbol}: ${score}% (${signalType})`);
+  logger.info(`⚡ Scalp Score ${symbol}: ${score}% (${signalType})`);
 
-  // FINAL DECISION
+  // RESULT
   if (score >= MIN_CONFIDENCE) {
-    // Dynamic Leverage Logic
-    const leverage = score >= 90 ? 2 : 1;
-    const type = leverage > 1 ? "LEVERAGE (2x)" : "SPOT (1x)";
-
-    logger.info(`🎯 Signal Qualifies as ${type}`);
-
+    const leverage = score >= 90 ? 5 : 1; // Scalping leverage lebih agresif jika yakin (Simulasi)
+    
     if (signalType === "BUY") {
       const tp = currentPrice * (1 + TP_PERCENT);
       const sl = currentPrice * (1 - SL_PERCENT);
