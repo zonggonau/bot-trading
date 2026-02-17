@@ -116,61 +116,58 @@ async function analyzeMarket(symbol) {
     - EMA(50): ${lastEMA.toFixed(2)}
     - BB Pos: ${currentPrice < lastBB.lower ? "LOW" : (currentPrice > lastBB.upper ? "HIGH" : "MID")}`);
 
-  // --- SCALPING SCORING SYSTEM ---
+  // --- SCALPING SCORING SYSTEM (Max Score ~120) ---
+  // Threshold: 80% (Requires Trend + Momentum + Confirmation)
   let score = 0;
   let signalType = null;
 
-  // 1. TENTUKAN BIAS (Trend Follow Scalping)
+  // 1. TENTUKAN BIAS TREND (25 Poin)
   // Harga di atas EMA 50 = Bias BUY
-  // Harga di bawah EMA 50 = Bias SELL
   if (currentPrice > lastEMA) {
      signalType = "BUY";
   } else {
      signalType = "SELL";
   }
+  score += 25; // Trend is mandatory basis for direction
 
-  // 2. MOMENTUM ENTRY (RSI & BB) (40 Poin)
+  // 2. MOMENTUM ENTRY (RSI) (Max 30 Poin)
   if (signalType === "BUY") {
-      // Buy saat pullback (RSI Oversold atau menyentuh BB Lower)
-      if (lastRSI < 40) score += 20; 
-      if (lastRSI < 30) score += 10; // Extra score for extreme oversold
-      if (currentPrice <= lastBB.lower * 1.002) score += 20; // Dekat Lower Band
+      // Buy saat pullback (RSI Oversold)
+      if (lastRSI < 45) score += 20; // Good Entry
+      if (lastRSI < 30) score += 10; // Perfect Entry
   } else {
-      // Sell saat rally (RSI Overbought atau menyentuh BB Upper)
-      if (lastRSI > 60) score += 20;
-      if (lastRSI > 70) score += 10; // Extra score for extreme overbought
-      if (currentPrice >= lastBB.upper * 0.998) score += 20; // Dekat Upper Band
+      // Sell saat rally (RSI Overbought)
+      if (lastRSI > 55) score += 20;
+      if (lastRSI > 70) score += 10;
   }
 
-  // 3. CONFIRMATION (MACD) (30 Poin)
-  // Reversal tanda histogram mulai membalik
+  // 3. CONFIRMATION (MACD) (25 Poin)
   if (signalType === "BUY") {
-      // Histogram naik atau positif
-      if (lastMACD.histogram > lastMACD.signal) score += 15;
-      if (lastMACD.histogram > 0) score += 15;
+      // Histogram menunjukkan pembalikan ke atas (semakin positif atau kurang negatif)
+      if (lastMACD.histogram > lastMACD.signal || lastMACD.histogram > 0) {
+          score += 25;
+      }
   } else {
-      // Histogram turun atau negatif
-      if (lastMACD.histogram < lastMACD.signal) score += 15;
-      if (lastMACD.histogram < 0) score += 15;
+      // Histogram menunjukkan pembalikan ke bawah
+      if (lastMACD.histogram < lastMACD.signal || lastMACD.histogram < 0) {
+          score += 25;
+      }
   }
 
-  // 4. TREND STRENGTH (ADX) (10 Poin)
-  // Scalping lebih aman saat ada volatilitas/trend
-  if (lastADX.adx > 15) score += 10;
+  // 4. VOLATILITY & PRICE ACTION (Bonus up to 40 Poin)
+  // Bollinger Band Touch (20 Poin)
+  if (signalType === "BUY" && currentPrice < lastBB.lower * 1.005) score += 20;
+  if (signalType === "SELL" && currentPrice > lastBB.upper * 0.995) score += 20;
 
-  // 5. PRICE ACTION (20 Poin)
-  // Breakout confirmation (simple logic)
-  if (signalType === "BUY") {
-      if(currentPrice > lastBB.middle) score += 10; // Strong buy zone
-  } else {
-      if(currentPrice < lastBB.middle) score += 10; // Strong sell zone
-  }
+  // ADX Trending Strength (20 Poin)
+  if (lastADX.adx > 20) score += 20;
 
   logger.info(`⚡ Scalp Score ${symbol}: ${score}% (${signalType})`);
 
-  // RESULT
-  if (score >= MIN_CONFIDENCE) {
-    const leverage = score >= 90 ? 5 : 1; // Scalping leverage lebih agresif jika yakin (Simulasi)
+  // RESULT (Must be >= 80)
+  if (score >= 80) {
+    // Leverage agresif untuk score tinggi (95+)
+    const leverage = score >= 95 ? 5 : 1; 
     
     if (signalType === "BUY") {
       const tp = currentPrice * (1 + TP_PERCENT);
