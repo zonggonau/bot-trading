@@ -63,47 +63,48 @@ function evaluateSignal(lastRSI, lastStochRSI, lastMACD, lastEMA, lastBB, lastAD
   let score = 0;
   let signalType = null;
 
-  // 1. TENTUKAN BIAS TREND (25 Poin)
+  // 1. TENTUKAN BIAS TREND UTAMA (30 Poin)
+  // Harga DI ATAS EMA 200 = Bullish Bias -> Cari BUY
+  // Harga DI BAWAH EMA 200 = Bearish Bias -> Cari SELL
   if (currentPrice > lastEMA) {
      signalType = "BUY";
   } else {
      signalType = "SELL";
   }
-  score += 25; // Trend is mandatory basis for direction
+  score += 30; 
 
-  // 2. MOMENTUM ENTRY (RSI + StochRSI) (Max 30 Poin)
+  // 2. MOMENTUM & KONDISI MARKET (RSI 14) (Max 30 Poin)
+  // Kita ingin entry saat koreksi dalam trend (Dip Buying / Rally Selling)
   if (signalType === "BUY") {
-      if (lastRSI < 45) score += 10; 
-      if (lastRSI < 30) score += 5;
-      if (lastStochRSI.k < 20 && lastStochRSI.k > lastStochRSI.d) score += 15;
+      // Bullish: Cari RSI yang tidak overbought (>70), idealnya < 60 untuk room to grow, atau > 40 untuk momentum
+      if (lastRSI > 40 && lastRSI < 70) score += 15; 
+      if (lastRSI > 50) score += 15; // RSI di atas 50 menandakan Bullish Control
   } else {
-      if (lastRSI > 55) score += 10;
-      if (lastRSI > 70) score += 5;
-      if (lastStochRSI.k > 80 && lastStochRSI.k < lastStochRSI.d) score += 15;
+      // Bearish: Cari RSI yang tidak oversold (<30)
+      if (lastRSI < 60 && lastRSI > 30) score += 15;
+      if (lastRSI < 50) score += 15; // RSI di bawah 50 menandakan Bearish Control
   }
 
-  // 3. CONFIRMATION (MACD) (25 Poin)
+  // 3. CONFIRMATION (MACD) (20 Poin)
+  // MACD Histogram searah dengan trend
   if (signalType === "BUY") {
-      if (lastMACD.histogram > lastMACD.signal || lastMACD.histogram > 0) {
-          score += 25;
-      }
+      if (lastMACD.histogram > 0) score += 20;
   } else {
-      if (lastMACD.histogram < lastMACD.signal || lastMACD.histogram < 0) {
-          score += 25;
-      }
+      if (lastMACD.histogram < 0) score += 20;
   }
 
-  // 4. VOLATILITY & PRICE ACTION (Bonus up to 40 Poin)
-  if (signalType === "BUY" && currentPrice < lastBB.lower * 1.005) score += 20;
-  if (signalType === "SELL" && currentPrice > lastBB.upper * 0.995) score += 20;
-  if (lastADX.adx > config.ADX_THRESHOLD) score += 20;
+  // 4. TREND STRENGTH (ADX) (20 Poin)
+  // ADX > 25 Menandakan Trend Kuat, sangat bagus untuk strategy 1H ini
+  if (lastADX.adx > config.ADX_THRESHOLD) {
+      score += 20;
+  }
 
   return { score, signalType };
 }
 
 async function analyzeMarket(symbol) {
   const candles = await fetchCandles(symbol, config.ANALYSIS_TIMEFRAME, config.CANDLE_LIMIT);
-  if (candles.length < 50) return null;
+  if (candles.length < 210) return null; // Ensure enough data for EMA200
 
   const closes = candles.map(c => c.close);
   const highs = candles.map(c => c.high);
@@ -115,7 +116,7 @@ async function analyzeMarket(symbol) {
   const lastRSI = rsi[rsi.length - 1];
   const lastStochRSI = stochRsi[stochRsi.length - 1] || { k: 50, d: 50 };
   const lastMACD = macd[macd.length - 1];
-  const lastEMA = ema50[ema50.length - 1];
+  const lastEMA = ema50[ema50.length - 1]; // This is actually EMA200 now based on config
   const lastBB = bb[bb.length - 1];
   const lastADX = adx[adx.length - 1];
 
@@ -124,16 +125,15 @@ async function analyzeMarket(symbol) {
   const { score, signalType } = evaluateSignal(lastRSI, lastStochRSI, lastMACD, lastEMA, lastBB, lastADX, currentPrice);
 
   if (score >= config.MIN_CONFIDENCE_SCORE) {
-      logger.info(`Analisa Scalping ${symbol} ($${currentPrice}):
-        - RSI(9): ${lastRSI.toFixed(2)}
-        - StochRSI(14): K=${lastStochRSI.k.toFixed(2)} D=${lastStochRSI.d.toFixed(2)}
-        - MACD: ${lastMACD.histogram.toFixed(4)}
-        - EMA(50): ${lastEMA.toFixed(2)}
-        - BB Pos: ${currentPrice < lastBB.lower ? "LOW" : (currentPrice > lastBB.upper ? "HIGH" : "MID")}`);
+      logger.info(`Analisa Trend 1H ${symbol} ($${currentPrice}):
+        - Trend (EMA200): ${currentPrice > lastEMA ? "BULLISH 🟢" : "BEARISH 🔴"}
+        - ADX Strength: ${lastADX.adx.toFixed(2)} (${lastADX.adx > 25 ? "Strong" : "Weak"})
+        - RSI(14): ${lastRSI.toFixed(2)}
+        - MACD Hist: ${lastMACD.histogram.toFixed(4)}`);
       
-      logger.info(`⚡ Scalp Score ${symbol}: ${score}% (${signalType})`);
+      logger.info(`⚡ Trend Score ${symbol}: ${score}% (${signalType})`);
       
-      const leverage = 1;
+      const leverage = 5; // Requested Low Risk Leverage
       const baseResult = { 
         symbol, score, leverage, 
         rsi: lastRSI, macd: lastMACD.histogram, 

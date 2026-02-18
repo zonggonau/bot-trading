@@ -22,17 +22,17 @@ export const config = {
   MARKET_DATA_URL: process.env.TRADING_ENV === 'futures' 
     ? (process.env.TRADING_MODE === 'testnet' ? "https://testnet.binancefuture.com/fapi/v1/klines" : "https://fapi.binance.com/fapi/v1/klines")
     : (process.env.TRADING_MODE === 'testnet' ? "https://testnet.binance.vision/api/v3/klines" : "https://api.binance.com/api/v3/klines"),
-  // Timeframe for analysis (e.g., "1m", "5m", "15m", "1h")
-  ANALYSIS_TIMEFRAME: "1m",
+  // Timeframe for analysis (1H - 4H Strategy)
+  ANALYSIS_TIMEFRAME: "1h",
   // Number of candles to fetch for analysis
   CANDLE_LIMIT: 200,
 
-  // === STRATEGY PARAMETERS (SCALPING 1-5m Optimized) ===
+  // === STRATEGY PARAMETERS (TREND FOLLOWING 1H Optimized) ===
   // Confidence score required to place a trade (0-100)
-  MIN_CONFIDENCE_SCORE: 80,
+  MIN_CONFIDENCE_SCORE: 75, // Slightly lower threshold for broader trend moves
   
   // RSI Settings
-  RSI_PERIOD: 9, 
+  RSI_PERIOD: 14, 
   
   // Stochastic RSI Settings
   STOCHRSI_PERIOD: 14,
@@ -40,12 +40,12 @@ export const config = {
   STOCHRSI_D: 3,
   
   // MACD Settings
-  MACD_FAST: 6,
-  MACD_SLOW: 13,
-  MACD_SIGNAL: 4,
+  MACD_FAST: 12, // Standard
+  MACD_SLOW: 26, // Standard
+  MACD_SIGNAL: 9, // Standard
   
   // EMA Settings (for trend direction)
-  EMA_PERIOD: 50,
+  EMA_PERIOD: 200, // 200 EMA is key for Trend Following
   
   // Bollinger Bands Settings
   BB_PERIOD: 20,
@@ -53,19 +53,19 @@ export const config = {
   
   // ADX Settings (for trend strength)
   ADX_PERIOD: 14,
-  ADX_THRESHOLD: 20, // Minimum ADX value to consider a trend strong
+  ADX_THRESHOLD: 25, // Stronger trend requirement
 
   // === RISK MANAGEMENT ===
   // The percentage of total equity to risk on a single trade (e.g., 0.01 for 1%)
-  RISK_PER_TRADE: 0.01,
-  // Take Profit percentage (e.g., 0.005 for 0.5%)
-  TP_PERCENT: 0.005,
-  // Stop Loss percentage (e.g., 0.003 for 0.3%)
-  SL_PERCENT: 0.003,
-  // Cooldown period in milliseconds between trades for the same symbol
-  TRADE_COOLDOWN_MS: 15 * 60 * 1000, // 15 minutes
-  // Target trade size in USDT (increased to 20 to avoid min-notional errors after rounding)
-  TARGET_NOTIONAL_USDT: 20,
+  RISK_PER_TRADE: 0.02, // 2% Risk
+  // Take Profit percentage (Target 3-8% -> Average ~5-6%)
+  TP_PERCENT: 0.06, 
+  // Stop Loss percentage (1-2%)
+  SL_PERCENT: 0.02, 
+  // Cooldown period: 1 Hour (since we trade on 1H candles)
+  TRADE_COOLDOWN_MS: 60 * 60 * 1000, 
+  // Target trade size in USDT
+  TARGET_NOTIONAL_USDT: 50, // Slightly larger position size for Swing
 
   // === EXTERNAL SIGNALS ===
   // URL for polling external signals (optional)

@@ -134,6 +134,7 @@ export async function executeTrade(tradeData) {
              logger.info(`✅ Futures TP/SL Orders Placed! TP: ${tp}, SL: ${sl}`);
          } else {
              // Spot: OCO Order
+             // Spot: OCO Order
              await exchange.privatePostOrderOco({
                 symbol: symbol.replace('/', ''),
                 side: exitSide.toUpperCase(), 
@@ -150,13 +151,34 @@ export async function executeTrade(tradeData) {
       }
     }
 
-    // 5. Register in Local DB
-    const finalTradeData = { ...tradeData, quantity: order.amount, price: order.price || price };
-    await registerTrade(finalTradeData);
-
+    // 5. Register Trade in Database
+    try {
+        await registerTrade({
+            symbol,
+            action,
+            price,
+            quantity: parseFloat(quantity), // Ensure number
+            sl,
+            tp,
+            score: tradeData.score || 0,
+            rsi: tradeData.rsi || 0,
+            macd: tradeData.macd || 0,
+            stoch_k: tradeData.stoch_k || 0,
+            stoch_d: tradeData.stoch_d || 0
+        });
+    } catch (dbErr) {
+        logger.error(`Failed to register trade in DB: ${dbErr.message}`);
+    }
     // 6. Send Notification
+    const finalTradeData = { ...tradeData, quantity: order.amount, price: order.price || price };
     const tradeDetails = `Action: **${action}**\nSymbol: **${symbol}**\nAvg Price: **$${finalTradeData.price}**\nQty: **${finalTradeData.quantity}**\nTP: **$${tp}**\nSL: **$${sl}**\nScore: **${tradeData.score}%**`;
     await sendNotification(`Trade Executed: ${action} ${symbol}`, tradeDetails);
+
+    return {
+      status: "filled",
+      orderId: order.id,
+      ...finalTradeData
+    };
 
     return {
       status: "filled",
