@@ -15,10 +15,15 @@ export const config = {
     "DOTUSDT",
     "AVAXUSDT",
   ],
-  // URL for fetching market data (Binance K-lines)
-  MARKET_DATA_URL: "https://api.binance.com/api/v3/klines",
+  // URL for fetching market data
+  // Spot: https://api.binance.com/api/v3/klines
+  // Futures Testnet: https://testnet.binancefuture.com/fapi/v1/klines
+  // Futures Live: https://fapi.binance.com/fapi/v1/klines
+  MARKET_DATA_URL: process.env.TRADING_ENV === 'futures' 
+    ? (process.env.TRADING_MODE === 'testnet' ? "https://testnet.binancefuture.com/fapi/v1/klines" : "https://fapi.binance.com/fapi/v1/klines")
+    : (process.env.TRADING_MODE === 'testnet' ? "https://testnet.binance.vision/api/v3/klines" : "https://api.binance.com/api/v3/klines"),
   // Timeframe for analysis (e.g., "1m", "5m", "15m", "1h")
-  ANALYSIS_TIMEFRAME: "5m",
+  ANALYSIS_TIMEFRAME: "1m",
   // Number of candles to fetch for analysis
   CANDLE_LIMIT: 200,
 
@@ -59,8 +64,8 @@ export const config = {
   SL_PERCENT: 0.003,
   // Cooldown period in milliseconds between trades for the same symbol
   TRADE_COOLDOWN_MS: 15 * 60 * 1000, // 15 minutes
-  // Target trade size in USDT (used as a fallback or for fixed-size trades)
-  TARGET_NOTIONAL_USDT: 12,
+  // Target trade size in USDT (increased to 20 to avoid min-notional errors after rounding)
+  TARGET_NOTIONAL_USDT: 20,
 
   // === EXTERNAL SIGNALS ===
   // URL for polling external signals (optional)

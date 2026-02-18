@@ -1,0 +1,23 @@
+PORT=3000
+SIGNAL_SECRET=hrXAdbDl5REiY8n3pv9gzXAKVb3gLsdoNCa8kIzDHTOKwoBNsKsBxI3OmhGetJ8X
+
+# Risk Management
+MAX_RISK_PER_TRADE=1
+MAX_DAILY_LOSS=5
+MAX_OPEN_TRADES=10
+
+# Binance Futures Testnet
+# Binance Futures Testnet
+# Get keys here: https://testnet.binancefuture.com/en/Register.html
+# Log in with your Binance account -> Go to API Key below the chart -> Click "Generate"
+
+BINANCE_API_KEY=MdMYyrHjDX9g3N75x5uecM4xPwr37rTZP3kWPVvNkyuFjDt47ok9Bi0PXXqVE2kA
+BINANCE_SECRET_KEY=Ty8pgbvdkyGSmpgHenCuCxybboCJ9lUJOU7oLYOoENuIfB8sQbFCvVmwv9CBJmZT
+
+# Production (Commented out for safety)
+# BINANCE_API_KEY=cGn4e6t7sG5r9vJZQRA0OHXjyGs7eIDwVfFlTWJinyUUgkk8zYx7uRd0DEpHU8nA
+# BINANCE_SECRET_KEY=vCIGP7mkGnx6d6PfjIaFO9YZRvKccqpYpuKWiV5xSnCdXHbatqz3xMpQ9V0dZVS6
+
+# Environment: 'spot' or 'futures'
+TRADING_ENV=spot
+TRADING_MODE=testnet # 'testnet' or 'live'

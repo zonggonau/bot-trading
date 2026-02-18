@@ -1,12 +1,11 @@
-import express from "express";
 import dotenv from "dotenv";
+dotenv.config();
+
+import express from "express";
 // Imports removed: checkRisk, executeTrade (No longer needed for manual signals)
 import { logger } from "./logger.js";
 import cron from "node-cron";
 import { runBotLoop } from "./bot_logic.js";
-
-
-dotenv.config();
 
 const app = express();
 app.use(express.json());

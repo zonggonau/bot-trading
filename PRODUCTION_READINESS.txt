@@ -1,0 +1,38 @@
+
+*** IMPORTANT ***
+
+1. API KEYS INVALID
+The current API keys in your .env file are REJECTED by Binance with "Invalid API-key, IP, or permissions".
+- If these are BRAND NEW keys, check if you enabled IP Restrictions (uncheck it for testing).
+- If these are Testnet keys, they might have expired or be from the wrong testnet dashboard.
+- If these are PRODUCTION keys, they will fail because TRADING_MODE is still 'testnet'.
+
+2. HOW TO GO TO PRODUCTION
+To run this bot with REAL MONEY (Live Production), follow these steps:
+
+Step A: Get Live Keys
+1. Log in to Binance.com (Real site, not testnet).
+2. Go to API Management.
+3. Create API Key.
+4. Enable "Enable Spot & Margin Trading" (for Spot) OR "Enable Futures" (for Futures).
+5. Copy Key & Secret.
+
+Step B: Update .env
+Change these lines in your .env file:
+-------------------------------------------
+TRADING_ENV=spot        <-- or 'futures'
+TRADING_MODE=live       <-- MUST BE 'live'
+BINANCE_API_KEY=your_real_key
+BINANCE_SECRET_KEY=your_real_secret
+-------------------------------------------
+
+Step C: Risk Management Warning
+Your config.js has:
+RISK_PER_TRADE: 0.01 (1% per trade)
+TRADE_COOLDOWN_MS: 15 minutes
+See config.js for more.
+
+3. REMOVE TEST SCRIPTS
+Delete check_api_keys.js and check_account.js before deploying to avoid confusion.
+
+*** END ***
